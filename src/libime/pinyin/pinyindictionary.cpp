@@ -663,13 +663,37 @@ void PinyinDictionaryPrivate::findMatchesBetween(
     const MatchedPinyinPaths &prevMatchedPaths = matchedPathsMap[&prevNode];
     MatchedPinyinPaths newPaths;
     for (const auto &path : prevMatchedPaths) {
+        // A span may have no reading at all, which is what a graph uses to
+        // carry a path across digits that belong to no syllable. The path still
+        // has to advance, otherwise it dies here and everything after it, whole
+        // words included, becomes unreachable.
+        if (readings.empty()) {
+            auto segmentPath = path.path_;
+            segmentPath.push_back(&currentNode);
+            newPaths.emplace_back(path.result_, std::move(segmentPath),
+                                  path.flags_);
+            continue;
+        }
         for (const auto reading : readings) {
+            // A graph gives readings in the dictionary's encoding (two bytes
+            // per syllable). Syllable lookup works on speller text, so decode
+            // it back first; passing the encoded form straight through finds
+            // nothing because it is not a key in the pinyin map.
+            std::string speller;
+            if (graph.readingResolver()) {
+                speller = PinyinEncoder::decodeFullPinyin(
+                    reading.data(), reading.size());
+            }
+            const auto &syllableText =
+                graph.readingResolver()
+                    ? std::string_view{speller}
+                    : reading;
             const auto syls =
                 context.spProfile_
                     ? PinyinEncoder::shuangpinToSyllablesWithFuzzyFlags(
-                          reading, *context.spProfile_, context.flags_)
+                          syllableText, *context.spProfile_, context.flags_)
                     : PinyinEncoder::stringToSyllablesWithFuzzyFlags(
-                          reading, context.correctionProfile_.get(),
+                          syllableText, context.correctionProfile_.get(),
                           context.flags_);
 
             // Make a copy of path so we can modify based on it.
