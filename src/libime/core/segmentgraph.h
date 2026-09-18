@@ -26,6 +26,7 @@
 #include <fcitx-utils/element.h>
 #include <fcitx-utils/macros.h>
 #include <libime/core/libimecore_export.h>
+#include <libime/core/spanreadingresolver.h>
 
 namespace libime {
 
@@ -136,6 +137,27 @@ public:
     // Return the string.
     const std::string &data() const { return data_; }
 
+    /**
+     * The resolver used to read the spans of this graph.
+     *
+     * A null resolver means every span stands for its own bytes, which is what
+     * an ordinary pinyin graph wants. A graph whose spans may each stand for
+     * one of several readings installs its own resolver.
+     *
+     * The resolver is not owned by the graph and must outlive it.
+     *
+     * @since 1.1.16
+     */
+    const SpanReadingResolver *readingResolver() const {
+        return readingResolver_;
+    }
+
+    /// Install the span reading resolver. See readingResolver().
+    /// @since 1.1.16
+    void setReadingResolver(const SpanReadingResolver *resolver) {
+        readingResolver_ = resolver;
+    }
+
     // Return the size of string.
     size_t size() const { return data().size(); }
 
@@ -233,6 +255,7 @@ private:
     }
 
     std::string data_;
+    const SpanReadingResolver *readingResolver_ = nullptr;
 };
 
 class LIBIMECORE_EXPORT SegmentGraph : public SegmentGraphBase {

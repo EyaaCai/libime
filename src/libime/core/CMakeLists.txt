@@ -50,6 +50,7 @@ set(LIBIME_HDRS
     prediction.h
     triedictionary.h
     utils.h
+    spanreadingresolver.h
     ${CMAKE_CURRENT_BINARY_DIR}/libimecore_export.h
     )
 
@@ -63,6 +64,7 @@ set(LIBIME_SRCS
     userlanguagemodel.cpp
     historybigram.cpp
     segmentgraph.cpp
+    spanreadingresolver.cpp
     utils.cpp
     prediction.cpp
     triedictionary.cpp
