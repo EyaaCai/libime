@@ -729,7 +729,8 @@ void PinyinDictionaryPrivate::findMatchesBetween(
                     // already advanced by exactly one. Keeping them separate
                     // matters only when a span is later read as several
                     // syllables without advancing more than one step.
-                    result->readingSyllables_ = result->size_;
+                    result->readingSyllables_ =
+                        path.readingSyllables() + reading.size() / 2;
                     if (extendedKey) {
                         nodeCache.insert(cacheKey, result);
                     } else {
@@ -754,7 +755,8 @@ void PinyinDictionaryPrivate::findMatchesBetween(
 
                 newPath.result_->triePositions_ =
                     traverseAlongPathOneStepBySyllables(path, syls);
-                newPath.result_->readingSyllables_ = newPath.result_->size_;
+                newPath.result_->readingSyllables_ =
+                    path.readingSyllables() + reading.size() / 2;
                 // if there's nothing, drop it.
                 if (!newPath.triePositions().empty()) {
                     newPaths.emplace_back(std::move(newPath));
