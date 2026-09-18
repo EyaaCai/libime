@@ -465,7 +465,7 @@ PinyinTriePositions traverseAlongPathOneStepBySyllables(
  * for why that is not wired up yet.
  */
 size_t readingLength(const MatchedPinyinPath &path) {
-    return path.size() * 2;
+    return path.readingSyllables() * 2;
 }
 
 template <typename T>
@@ -701,6 +701,11 @@ void PinyinDictionaryPrivate::findMatchesBetween(
                         path.trie(), path.size() + 1);
                     result->triePositions_ =
                         traverseAlongPathOneStepBySyllables(path, syls);
+                    // The reading's syllable count IS this node's size, which
+                    // already advanced by exactly one. Keeping them separate
+                    // matters only when a span is later read as several
+                    // syllables without advancing more than one step.
+                    result->readingSyllables_ = result->size_;
                     if (extendedKey) {
                         nodeCache.insert(cacheKey, result);
                     } else {
@@ -725,6 +730,7 @@ void PinyinDictionaryPrivate::findMatchesBetween(
 
                 newPath.result_->triePositions_ =
                     traverseAlongPathOneStepBySyllables(path, syls);
+                newPath.result_->readingSyllables_ = newPath.result_->size_;
                 // if there's nothing, drop it.
                 if (!newPath.triePositions().empty()) {
                     newPaths.emplace_back(std::move(newPath));

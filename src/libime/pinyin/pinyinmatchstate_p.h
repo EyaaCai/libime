@@ -39,6 +39,10 @@ struct MatchedPinyinTrieNodes {
 
     // Size of syllables.
     size_t size_;
+
+    // Syllables the spans were read as; differs from size_ when a span carries
+    // more than one syllable.
+    size_t readingSyllables_ = size_;
 };
 
 // A cache to store the matched word, encoded Full Pinyin for this word and the
@@ -75,6 +79,9 @@ struct MatchedPinyinPath {
     // Size of syllables. not necessarily equal to size of path_, because there
     // may be separators.
     auto size() const { return result_->size_; }
+
+    /// Syllables the spans were read as. See MatchedPinyinTrieNodes.
+    auto readingSyllables() const { return result_->readingSyllables_; }
 
     std::shared_ptr<MatchedPinyinTrieNodes> result_;
     SegmentGraphPath path_;
