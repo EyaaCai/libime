@@ -55,6 +55,20 @@ public:
              const SegmentGraphNode &to) const;
 };
 
+/**
+ * Keypad digit a latin letter sits on, following the standard phone layout.
+ *
+ * 2 abc, 3 def, 4 ghi, 5 jkl, 6 mno, 7 pqrs, 8 tuv, 9 wxyz. Letters outside
+ * a-z, and the digits 0 and 1 which carry no letters, yield '\0'.
+ *
+ * This is the mapping every nine key layout uses, and it is a property of the
+ * keypad rather than of pinyin, so it lives with the reading abstraction
+ * instead of in a pinyin header.
+ *
+ * @since 1.1.16
+ */
+LIBIMECORE_EXPORT char letterToKeypadDigit(char letter);
+
 } // namespace libime
 
 #endif // _FCITX_LIBIME_CORE_SPANREADINGRESOLVER_H_

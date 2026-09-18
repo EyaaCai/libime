@@ -34,6 +34,17 @@ public:
     void setUseShuangpin(bool sp);
     bool useShuangpin() const;
 
+    /**
+     * Use nine key input: the buffer holds keypad digits rather than letters,
+     * and each digit run reads as any pinyin sharing it.
+     *
+     * Mutually exclusive with shuangpin; enabling one clears the other.
+     *
+     * @since 1.1.16
+     */
+    void setUseT9(bool t9);
+    bool useT9() const;
+
     void erase(size_t from, size_t to) override;
     void setCursor(size_t pos) override;
 

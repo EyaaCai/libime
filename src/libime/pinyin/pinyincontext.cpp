@@ -41,6 +41,7 @@
 #include "pinyinencoder.h"
 #include "pinyinime.h"
 #include "pinyinmatchstate.h"
+#include "t9encoder.h"
 
 namespace libime {
 
@@ -154,6 +155,7 @@ public:
     std::vector<std::vector<SelectedPinyin>> selected_;
 
     bool sp_ = false;
+    bool t9_ = false;
     int maxSentenceLength_ = -1;
     PinyinIME *ime_;
     SegmentGraph segs_;
@@ -451,6 +453,22 @@ bool PinyinContext::useShuangpin() const {
     return d->sp_;
 }
 
+void PinyinContext::setUseT9(bool t9) {
+    FCITX_D();
+    d->t9_ = t9;
+    // Nine key and shuangpin both reinterpret the buffer, so they cannot be on
+    // at once.
+    if (t9) {
+        d->sp_ = false;
+    }
+    d->matchState_.clear();
+}
+
+bool PinyinContext::useT9() const {
+    FCITX_D();
+    return d->t9_;
+}
+
 void PinyinContext::setMaxSentenceLength(int length) {
     FCITX_D();
     d->maxSentenceLength_ = length;
@@ -685,7 +703,13 @@ void PinyinContext::update() {
             start = d->selected_.back().back().offset_;
         }
         SegmentGraph newGraph;
-        if (auto spProfile = d->matchState_.shuangpinProfile()) {
+        if (d->t9_) {
+            // Nine key: the buffer holds digits and each digit run reads as any
+            // pinyin sharing those digits. The graph carries its own reading
+            // resolver, so the dictionary and decoder need no special case.
+            newGraph = PinyinT9Encoder::parseUserT9(
+                std::string(userInput().substr(start)));
+        } else if (auto spProfile = d->matchState_.shuangpinProfile()) {
             newGraph = PinyinEncoder::parseUserShuangpin(
                 userInput().substr(start), *spProfile, d->ime_->fuzzyFlags());
         } else {
