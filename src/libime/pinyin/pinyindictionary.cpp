@@ -147,6 +147,22 @@ struct PinyinSegmentGraphPathHasher {
         return iter + 1 == path.end() && is == s.end();
     }
 
+    /**
+     * Hash of a cache key built by pathToPinyins(), possibly extended with the
+     * reading a span was taken as.
+     *
+     * The extended form makes one graph path map to more than one trie state,
+     * so the cache is no longer keyed on the path alone.
+     */
+    size_t operator()(const std::string &s) const {
+        boost::hash<char> hasher;
+        size_t seed = 0;
+        for (char c : s) {
+            boost::hash_combine(seed, hasher(c));
+        }
+        return seed;
+    }
+
 private:
     const SegmentGraph &graph_;
 };
@@ -439,9 +455,26 @@ PinyinTriePositions traverseAlongPathOneStepBySyllables(
     return positions;
 }
 
+/**
+ * Byte length of the pinyin a path was read as.
+ *
+ * Two bytes per syllable, which is what a span standing for its own bytes
+ * produces. Once a graph hands a span several readings, a reading may be longer
+ * than the span and this must return the reading's own length instead, which
+ * needs the taken reading carried on the path. See T9_READING_HOOK_PROGRESS.md
+ * for why that is not wired up yet.
+ */
+size_t readingLength(const MatchedPinyinPath &path) {
+    return path.size() * 2;
+}
+
 template <typename T>
 void matchWordsOnTrie(const PinyinTrie *userDict, const MatchedPinyinPath &path,
                       bool matchLongWord, const T &callback) {
+    // Two bytes per syllable that the path was actually read as. This is not
+    // always path.size() * 2: a span may stand for a reading of a different
+    // length, as in a nine key graph.
+    const size_t readingLen = readingLength(path);
     for (const auto &pr : path.triePositions()) {
         uint64_t pos;
         size_t fuzzies;
@@ -453,13 +486,13 @@ void matchWordsOnTrie(const PinyinTrie *userDict, const MatchedPinyinPath &path,
         const bool isCorrection = fuzzies >= PINYIN_CORRECTION_FUZZY_FACTOR;
         if (matchLongWord) {
             path.trie()->foreach(
-                [userDict, &path, &callback, extraCost, isCorrection](
-                    PinyinTrie::value_type value, size_t len, uint64_t pos) {
+                [userDict, &path, &callback, extraCost, isCorrection,
+                 readingLen](PinyinTrie::value_type value, size_t len,
+                             uint64_t pos) {
                     std::string s;
-                    s.reserve(len + (path.size() * 2));
-                    path.trie()->suffix(s, len + (path.size() * 2), pos);
-                    if (size_t separator =
-                            s.find(pinyinHanziSep, path.size() * 2);
+                    s.reserve(len + readingLen);
+                    path.trie()->suffix(s, len + readingLen, pos);
+                    if (size_t separator = s.find(pinyinHanziSep, readingLen);
                         separator != std::string::npos) {
                         std::string_view view(s);
                         auto encodedPinyin = view.substr(0, separator);
@@ -488,14 +521,14 @@ void matchWordsOnTrie(const PinyinTrie *userDict, const MatchedPinyinPath &path,
             }
 
             path.trie()->foreach(
-                [&path, &callback, extraCost, isCorrection](
+                [&path, &callback, extraCost, isCorrection, readingLen](
                     PinyinTrie::value_type value, size_t len, uint64_t pos) {
                     std::string s;
-                    s.reserve(len + (path.size() * 2) + 1);
-                    path.trie()->suffix(s, len + (path.size() * 2) + 1, pos);
+                    s.reserve(len + readingLen + 1);
+                    path.trie()->suffix(s, len + readingLen + 1, pos);
                     std::string_view view(s);
-                    auto encodedPinyin = view.substr(0, path.size() * 2);
-                    auto hanzi = view.substr((path.size() * 2) + 1);
+                    auto encodedPinyin = view.substr(0, readingLen);
+                    auto hanzi = view.substr(readingLen + 1);
                     callback(encodedPinyin, hanzi, value + extraCost,
                              isCorrection);
                     return true;
@@ -617,50 +650,85 @@ void PinyinDictionaryPrivate::findMatchesBetween(
         return;
     }
 
-    const auto syls =
-        context.spProfile_
-            ? PinyinEncoder::shuangpinToSyllablesWithFuzzyFlags(
-                  pinyin, *context.spProfile_, context.flags_)
-            : PinyinEncoder::stringToSyllablesWithFuzzyFlags(
-                  pinyin, context.correctionProfile_.get(), context.flags_);
+    // The spans of an ordinary pinyin graph stand for their own bytes; a graph
+    // may instead give each span one of several readings, such as a nine key
+    // digit graph where a run of digits reads as any pinyin sharing them.
+    std::vector<std::string_view> readings;
+    if (const auto *resolver = graph.readingResolver()) {
+        readings = resolver->readings(graph, prevNode, currentNode);
+    } else {
+        readings.emplace_back(pinyin);
+    }
+
     const MatchedPinyinPaths &prevMatchedPaths = matchedPathsMap[&prevNode];
     MatchedPinyinPaths newPaths;
     for (const auto &path : prevMatchedPaths) {
-        // Make a copy of path so we can modify based on it.
-        auto segmentPath = path.path_;
-        segmentPath.push_back(&currentNode);
+        for (const auto reading : readings) {
+            const auto syls =
+                context.spProfile_
+                    ? PinyinEncoder::shuangpinToSyllablesWithFuzzyFlags(
+                          reading, *context.spProfile_, context.flags_)
+                    : PinyinEncoder::stringToSyllablesWithFuzzyFlags(
+                          reading, context.correctionProfile_.get(),
+                          context.flags_);
 
-        // A map from trie (dict) to a lru cache.
-        if (context.nodeCacheMap_) {
-            auto &nodeCache = (*context.nodeCacheMap_)[path.trie()];
-            auto *p =
-                nodeCache.find(segmentPath, context.hasher_, context.hasher_);
-            std::shared_ptr<MatchedPinyinTrieNodes> result;
-            if (!p) {
-                result = std::make_shared<MatchedPinyinTrieNodes>(
-                    path.trie(), path.size() + 1);
-                nodeCache.insert(context.hasher_.pathToPinyins(segmentPath),
-                                 result);
-                result->triePositions_ =
-                    traverseAlongPathOneStepBySyllables(path, syls);
+            // Make a copy of path so we can modify based on it.
+            auto segmentPath = path.path_;
+            segmentPath.push_back(&currentNode);
+
+            // A map from trie (dict) to an lru cache.
+            if (context.nodeCacheMap_) {
+                auto &nodeCache = (*context.nodeCacheMap_)[path.trie()];
+                // The reading takes part in the cache key: one graph path may
+                // now carry several readings and each advances the trie
+                // differently, so path alone no longer identifies the state.
+                // When the reading is just the span bytes the plain key still
+                // applies, and the heterogeneous lookup can be used to avoid
+                // allocating it.
+                const bool extendedKey = reading != pinyin;
+                std::string cacheKey;
+                if (extendedKey) {
+                    cacheKey = context.hasher_.pathToPinyins(segmentPath);
+                    cacheKey.append(reading);
+                }
+                auto *p = extendedKey
+                              ? nodeCache.find(cacheKey)
+                              : nodeCache.find(segmentPath, context.hasher_,
+                                               context.hasher_);
+                std::shared_ptr<MatchedPinyinTrieNodes> result;
+                if (!p) {
+                    result = std::make_shared<MatchedPinyinTrieNodes>(
+                        path.trie(), path.size() + 1);
+                    result->triePositions_ =
+                        traverseAlongPathOneStepBySyllables(path, syls);
+                    if (extendedKey) {
+                        nodeCache.insert(cacheKey, result);
+                    } else {
+                        nodeCache.insert(
+                            context.hasher_.pathToPinyins(segmentPath),
+                            result);
+                    }
+                } else {
+                    result = *p;
+                    assert(result->size_ == path.size() + 1);
+                }
+
+                if (!result->triePositions_.empty()) {
+                    newPaths.emplace_back(result, std::move(segmentPath),
+                                          path.flags_);
+                }
             } else {
-                result = *p;
-                assert(result->size_ == path.size() + 1);
-            }
+                // make an empty one
+                auto newPath =
+                    MatchedPinyinPath{path.trie(), path.size() + 1,
+                                      std::move(segmentPath), path.flags_};
 
-            if (!result->triePositions_.empty()) {
-                newPaths.emplace_back(result, segmentPath, path.flags_);
-            }
-        } else {
-            // make an empty one
-            newPaths.emplace_back(path.trie(), path.size() + 1, segmentPath,
-                                  path.flags_);
-
-            newPaths.back().result_->triePositions_ =
-                traverseAlongPathOneStepBySyllables(path, syls);
-            // if there's nothing, pop it.
-            if (newPaths.back().triePositions().empty()) {
-                newPaths.pop_back();
+                newPath.result_->triePositions_ =
+                    traverseAlongPathOneStepBySyllables(path, syls);
+                // if there's nothing, drop it.
+                if (!newPath.triePositions().empty()) {
+                    newPaths.emplace_back(std::move(newPath));
+                }
             }
         }
     }
